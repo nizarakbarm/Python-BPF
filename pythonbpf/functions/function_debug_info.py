@@ -50,18 +50,20 @@ def generate_function_debug_info(
             )
         context_debug_info = VmlinuxHandlerRegistry.get_struct_debug_info(annotation.id)
 
-        # Create pointer to context this must be created fresh for each function
-        # to avoid circular reference issues when the same struct is used in multiple functions
+        # Pointer to the context. This node and the subroutine type below are
+        # deduplicated by llvmlite, so two functions with the same context type
+        # share them. That is safe: neither is mutated after creation.
         pointer_to_context_debug_info = generator.create_pointer_type(
             context_debug_info, 64
         )
 
-        # Create subroutine type - also fresh for each function
+        # Subroutine type: shared with any other function of the same signature
         subroutine_type = generator.create_subroutine_type(
             return_type, pointer_to_context_debug_info
         )
 
-        # Create local variable - fresh for each function with unique name
+        # Local variable: one node per function, never shared. add_scope_to_local_variable
+        # writes "scope" into it below, which a shared node cannot survive.
         context_local_variable = generator.create_local_variable_debug_info(
             leading_argument_name, 1, pointer_to_context_debug_info
         )
