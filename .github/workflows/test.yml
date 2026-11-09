@@ -92,6 +92,15 @@ jobs:
           echo "$scripts_dir" >> "$GITHUB_PATH"
           echo "scripts dir: $scripts_dir"
           ls "$scripts_dir" | grep -E "clang2py|pytest" || true
+          echo "--- clang2py probe ---"
+          clang2py --version 2>&1 | head -5 || echo "clang2py exited $?"
+          echo "--- libclang probe ---"
+          ldconfig -p | grep libclang | head -5 || echo "no libclang in ldconfig"
+          python - <<'EOF' || true
+import clang.cindex as ci
+print("library_file:", ci.Config.library_file)
+print("library_path:", ci.Config.library_path)
+EOF
 
       - name: Run test suite
         # `make test` regenerates vmlinux.py first and needs bpftool for that;
