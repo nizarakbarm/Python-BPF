@@ -82,6 +82,17 @@ jobs:
       - name: Install project
         run: uv pip install --system -e ".[test]"
 
+      # uv installs console scripts (clang2py, from ctypeslib2) into the
+      # interpreter's scripts directory. That directory is not reliably on
+      # PATH for setup-python, and tools/vmlinux-gen.py looks clang2py up with
+      # shutil.which, so put it there explicitly.
+      - name: Put console scripts on PATH
+        run: |
+          scripts_dir=$(python -c 'import sysconfig; print(sysconfig.get_path("scripts"))')
+          echo "$scripts_dir" >> "$GITHUB_PATH"
+          echo "scripts dir: $scripts_dir"
+          ls "$scripts_dir" | grep -E "clang2py|pytest" || true
+
       - name: Run test suite
         # `make test` regenerates vmlinux.py first and needs bpftool for that;
         # without it, run pytest directly so the IR + LLC levels still gate.
