@@ -3,8 +3,11 @@ Debug information generation module for Python-BPF
 Provides utilities for generating DWARF/BTF debug information
 """
 
-from . import dwarf_constants as dc
 from typing import Any, List
+
+from llvmlite.ir import values
+
+from . import dwarf_constants as dc
 
 
 class DebugInfoGenerator:
@@ -248,14 +251,26 @@ class DebugInfoGenerator:
         Example:
         !DILocalVariable(name: "ctx", arg: 1, file: !3, line: 20, type: !7)
         """
-        return self.module.add_debug_info(
+        # Not Module.add_debug_info: that call deduplicates by operand value, so
+        # every function whose context annotation is the same receives one
+        # shared node. add_scope_to_local_variable then writes "scope" into it,
+        # making DILocalVariable -> DISubprogram -> retainedNodes -> the same
+        # DILocalVariable a cycle, and the next cache lookup hashes that cycle
+        # into a RecursionError. A fresh node per function keeps the graph a
+        # tree. (is_distinct does not help: it is part of the cache key, and
+        # every caller passes the same value.)
+        operands = (
+            ("arg", arg),
+            ("file", self.module._file_metadata),
+            ("name", name),
+            ("type", var_type),
+        )
+        return values.DIValue(
+            self.module,
+            False,
             "DILocalVariable",
-            {
-                "name": name,
-                "arg": arg,
-                "file": self.module._file_metadata,
-                "type": var_type,
-            },
+            operands,
+            name=str(len(self.module.metadata)),
         )
 
     def add_scope_to_local_variable(self, local_variable_debug_info, scope_value):

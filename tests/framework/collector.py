@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 import tomllib
@@ -17,11 +18,22 @@ VMLINUX_TEST_DIRS_FAILING = {
 }
 
 
+# A fixture can need vmlinux.py without living in one of the vmlinux/
+# directories: tests/passing_tests/xdp/xdp_test_1.py imports XDP_* and
+# struct_xdp_md from it. Deciding by directory alone marked that file as
+# runnable on hosts where vmlinux.py does not exist, and it failed at IR
+# generation instead of being skipped. Sniff the import as well.
+_VMLINUX_IMPORT = re.compile(
+    r"^\s*(?:from vmlinux import|import vmlinux)", re.MULTILINE
+)
+
+
 def _is_vmlinux_test(rel_path: str) -> bool:
     for prefix in VMLINUX_TEST_DIRS_PASSING | VMLINUX_TEST_DIRS_FAILING:
         if rel_path.startswith(prefix):
             return True
-    return False
+    source = (TESTS_DIR / rel_path).read_text(errors="replace")
+    return bool(_VMLINUX_IMPORT.search(source))
 
 
 def _load_config() -> dict:
