@@ -96,11 +96,7 @@ jobs:
           clang2py --version 2>&1 | head -5 || echo "clang2py exited $?"
           echo "--- libclang probe ---"
           ldconfig -p | grep libclang | head -5 || echo "no libclang in ldconfig"
-          python - <<'EOF' || true
-import clang.cindex as ci
-print("library_file:", ci.Config.library_file)
-print("library_path:", ci.Config.library_path)
-EOF
+          python -c "import clang.cindex as ci; print('library_file:', ci.Config.library_file); print('library_path:', ci.Config.library_path)" || true
 
       - name: Run test suite
         # `make test` regenerates vmlinux.py first and needs bpftool for that;
