@@ -118,4 +118,7 @@ jobs:
         if: steps.sudo-check.outputs.available == 'true'
         run: |
           sudo -v
-          sudo pytest tests/test_verifier.py -W ignore::DeprecationWarning -v --tb=short -m verifier
+          # sudo resets PATH to secure_path, which does not contain the
+          # setup-python scripts dir, so hand the environment through.
+          sudo env "PATH=$PATH" python -m pytest tests/test_verifier.py \
+            -W ignore::DeprecationWarning -v --tb=short -m verifier
