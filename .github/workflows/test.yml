@@ -50,19 +50,12 @@ jobs:
           clang --version
           llc --version
 
-          # bpftool isn't an installable package by itself on Ubuntu: it's a
-          # virtual package provided by linux-tools-common + a kernel-flavor
-          # linux-tools-<flavor> package. The runner's exact kernel version
-          # has no matching linux-tools-<version> package, so the
-          # update-alternatives symlink for `bpftool` doesn't get set up;
-          # find whatever binary the generic-flavor package installed and
-          # put it on PATH ourselves.
-          # Newer runner images ship no per-flavour linux-tools-<version>
-          # package, so the binary can live in several places or be absent
-          # entirely. Search widely, and fall back to skipping the vmlinux
-          # fixtures instead of failing the whole job: `make test` needs
-          # bpftool only to regenerate vmlinux.py from the running kernel's
-          # BTF, and pytest skips those fixtures when vmlinux.py is missing.
+          # bpftool isn't an installable package by itself on Ubuntu: it comes
+          # from linux-tools-common plus a kernel-flavour linux-tools-<flavour>
+          # package, and newer runner images ship neither under a path the
+          # update-alternatives symlink covers. Search widely; if it is still
+          # missing, warn and carry on - vmlinux.py is optional (see the
+          # "Generate vmlinux fixture" step).
           bpftool_bin=$(sudo find /usr/lib/linux-tools* /usr/libexec/linux-tools* /usr/sbin /usr/bin \
                           -name bpftool -type f 2>/dev/null | head -1)
           if [ -n "$bpftool_bin" ]; then
@@ -82,31 +75,31 @@ jobs:
       - name: Install project
         run: uv pip install --system -e ".[test]"
 
-      # uv installs console scripts (clang2py, from ctypeslib2) into the
-      # interpreter's scripts directory. That directory is not reliably on
-      # PATH for setup-python, and tools/vmlinux-gen.py looks clang2py up with
-      # shutil.which, so put it there explicitly.
+      # uv installs console scripts (clang2py from ctypeslib2, pytest) into the
+      # interpreter's scripts directory, which setup-python does not reliably
+      # export, and tools/vmlinux-gen.py looks clang2py up with shutil.which.
       - name: Put console scripts on PATH
         run: |
           scripts_dir=$(python -c 'import sysconfig; print(sysconfig.get_path("scripts"))')
           echo "$scripts_dir" >> "$GITHUB_PATH"
           echo "scripts dir: $scripts_dir"
-          ls "$scripts_dir" | grep -E "clang2py|pytest" || true
-          echo "--- clang2py probe ---"
-          clang2py --version 2>&1 | head -5 || echo "clang2py exited $?"
-          echo "--- libclang probe ---"
-          ldconfig -p | grep libclang | head -5 || echo "no libclang in ldconfig"
-          python -c "import clang.cindex as ci; print('library_file:', ci.Config.library_file); print('library_path:', ci.Config.library_path)" || true
+
+      # vmlinux.py needs bpftool, clang2py, and a libclang matching the pinned
+      # python bindings. Runner images move (this one carries LLVM 22 only, the
+      # pin is clang 16.0.6), so a mismatch degrades instead of blocking: pytest
+      # skips the vmlinux fixtures when vmlinux.py is absent and every other
+      # level still gates. A run where this step fails prints a warning.
+      - name: Generate vmlinux fixture
+        id: vmlinux
+        continue-on-error: true
+        run: python3 tools/vmlinux-gen.py -o vmlinux.py
+
+      - name: Report missing vmlinux coverage
+        if: steps.vmlinux.outcome != 'success'
+        run: echo "::warning::vmlinux.py was not generated; vmlinux fixtures were skipped in this run."
 
       - name: Run test suite
-        # `make test` regenerates vmlinux.py first and needs bpftool for that;
-        # without it, run pytest directly so the IR + LLC levels still gate.
-        run: |
-          if command -v bpftool >/dev/null 2>&1; then
-            make test
-          else
-            pytest tests/ -W ignore::DeprecationWarning -v --tb=short -m "not verifier"
-          fi
+        run: pytest tests/ -W ignore::DeprecationWarning -v --tb=short -m "not verifier"
 
       - name: Check whether sudo is usable
         id: sudo-check
@@ -119,8 +112,10 @@ jobs:
             echo "available=false" >> "$GITHUB_OUTPUT"
           fi
 
+      # `make test-verifier` regenerates vmlinux.py first; call pytest directly
+      # so a missing vmlinux fixture only skips those cases.
       - name: Run kernel verifier tests
         if: steps.sudo-check.outputs.available == 'true'
         run: |
           sudo -v
-          make test-verifier
+          sudo pytest tests/test_verifier.py -W ignore::DeprecationWarning -v --tb=short -m verifier
