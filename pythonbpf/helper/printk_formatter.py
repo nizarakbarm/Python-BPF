@@ -215,13 +215,28 @@ def _create_format_string_global(fmt_str, func, module, builder):
 def _prepare_expr_args(expr, func, compilation_context, builder, local_sym_tab):
     """Evaluate and prepare an expression to use as an arg for bpf_printk."""
 
-    # Special case: struct field char array needs pointer to first element
+    # Special case: a char array, as a struct field or a `c_char * N` local,
+    # needs a pointer to its first element: %s takes an i8*, not the array.
     if isinstance(expr, ast.Attribute):
         char_array_ptr, _ = get_char_array_ptr_and_size(
             expr, builder, local_sym_tab, compilation_context, func
         )
         if char_array_ptr:
             return char_array_ptr
+
+    if isinstance(expr, ast.Name) and local_sym_tab:
+        symbol = local_sym_tab.get(expr.id)
+        if (
+            symbol is not None
+            and isinstance(symbol.ir_type, ir.ArrayType)
+            and isinstance(symbol.ir_type.element, ir.IntType)
+            and symbol.ir_type.element.width == 8
+        ):
+            char_array_ptr, _ = get_char_array_ptr_and_size(
+                expr, builder, local_sym_tab, compilation_context, func
+            )
+            if char_array_ptr:
+                return char_array_ptr
 
     # Regular expression evaluation
     val, _ = eval_expr(func, compilation_context, builder, expr, local_sym_tab)

@@ -184,10 +184,6 @@ def process_vmlinux_post_ast(
     current_symbol_name = elem_type_class.__name__
     logger.info(f"Begin {current_symbol_name} Processing")
     field_table: Dict[str, list] = {}
-    is_complex_type = False
-    containing_type: Optional[Any] = None
-    ctype_complex_type: Optional[Any] = None
-    type_length: Optional[int] = None
     module_name = getattr(elem_type_class, "__module__", None)
 
     # Check if already processed
@@ -246,6 +242,19 @@ def process_vmlinux_post_ast(
                 elem_name, elem_temp_list = elem
                 [elem_type, elem_bitfield_size] = elem_temp_list
                 local_module_name = getattr(elem_type, "__module__", None)
+                # Field metadata is per field. These used to be initialised once
+                # per struct, so a pointer following an array inherited
+                # ctype_complex_type=Array and type_size=4, and the IR/BTF
+                # layers then treated the pointer as an array.
+                is_complex_type = False
+                containing_type = None
+                ctype_complex_type = None
+                type_length = None
+                if isinstance(elem_type, type):
+                    if issubclass(elem_type, ctypes.Array):
+                        ctype_complex_type = ctypes.Array
+                    elif issubclass(elem_type, ctypes._Pointer):
+                        ctype_complex_type = ctypes._Pointer
                 new_dep_node.add_field(elem_name, elem_type, ready=False)
 
                 if local_module_name == ctypes.__name__:

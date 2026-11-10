@@ -7,6 +7,24 @@ from typing import List, Any, Tuple
 logger = logging.getLogger(__name__)
 
 
+def is_function_pointer(ctype_complex_type) -> bool:
+    """True for the CFUNCTYPE marker class_handler stores, or a CFUNCTYPE class.
+
+    `callable()` cannot answer this: ctypes.Array and ctypes._Pointer are
+    classes too, so they are callable, and testing callability made every
+    array and pointer field take the function-pointer branch. BTF then typed
+    each array as an 8-byte void pointer; a trailing `c_char * 0` (a flexible
+    array member) landed a pointer at the struct's end and the kernel rejected
+    the whole BTF section with "Member exceeds struct_size".
+    """
+    if ctype_complex_type is ctypes.CFUNCTYPE:
+        # class_handler stores the factory itself as the marker.
+        return True
+    return isinstance(ctype_complex_type, type) and issubclass(
+        ctype_complex_type, ctypes._CFuncPtr
+    )
+
+
 def debug_info_generation(
     struct: DependencyNode,
     llvm_module,
@@ -203,15 +221,18 @@ def _get_field_debug_type(
     """
     # Handle complex types (arrays, pointers, function pointers)
     if field.ctype_complex_type is not None:
-        # Handle function pointer types (CFUNCTYPE)
-        if callable(field.ctype_complex_type):
+        # Handle function pointer types (CFUNCTYPE); callable() is true for
+        # ctypes.Array/_Pointer as well and must not decide this branch.
+        if is_function_pointer(field.ctype_complex_type):
             # Function pointers are represented as void pointers
             logger.warning(
                 f"Field {field_name} is a function pointer, using void pointer"
             )
             void_ptr = generator.create_pointer_type(None, 64)
             return void_ptr, 64
-        elif issubclass(field.ctype_complex_type, ctypes.Array):
+        elif isinstance(field.ctype_complex_type, type) and issubclass(
+            field.ctype_complex_type, ctypes.Array
+        ):
             # Handle array types
             element_type, base_type_size = _get_basic_debug_type(
                 field.containing_type, generator
@@ -219,7 +240,9 @@ def _get_field_debug_type(
             return generator.create_array_type_vmlinux(
                 (element_type, base_type_size * field.type_size), field.type_size
             ), field.type_size * base_type_size
-        elif issubclass(field.ctype_complex_type, ctypes._Pointer):
+        elif isinstance(field.ctype_complex_type, type) and issubclass(
+            field.ctype_complex_type, ctypes._Pointer
+        ):
             # Handle pointer types
             pointee_type, _ = _get_basic_debug_type(field.containing_type, generator)
             return generator.create_pointer_type(pointee_type), 64
