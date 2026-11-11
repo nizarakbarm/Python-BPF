@@ -158,9 +158,31 @@ Safely read a null-terminated string from kernel memory.
 
 > **Linux Kernel Helper:** `bpf_probe_read_str()`
 
+```python
+from ctypes import c_char, c_int64
+from pythonbpf import bpf, section
+from pythonbpf.helper import probe_read_str
+from vmlinux import struct_filename, struct_pt_regs
+
+@bpf
+@section("kprobe/do_unlinkat")
+def unlink_entry(ctx: struct_pt_regs) -> c_int64:
+    # rsi holds `struct filename *`; cast the value to the struct.
+    fname = struct_filename(ctx.si)
+    # The destination is a stack buffer; its size comes from the declaration.
+    buf = c_char * 256
+    n = probe_read_str(buf, fname.name)
+    print(f"name={buf} n={n}")
+    return 0
+```
+
+A pointer held in a register or an i64 local is cast to a pointer for the
+helper, so the address it reads is the one the register points at, not the
+stack slot holding it.
+
 **Parameters:**
-* `dst` - Destination buffer (string)
-* `src` - Source kernel address
+* `dst` - Destination buffer, declared as `c_char * N`
+* `src` - Source kernel address (a pointer, or an integer holding one)
 
 **Returns:** `c_int64` - Length of string on success, negative on error
 
