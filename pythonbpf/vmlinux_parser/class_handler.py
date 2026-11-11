@@ -248,7 +248,7 @@ def process_vmlinux_post_ast(
                 # layers then treated the pointer as an array.
                 is_complex_type = False
                 containing_type = None
-                ctype_complex_type = None
+                ctype_complex_type: Optional[Any] = None
                 type_length = None
                 if isinstance(elem_type, type):
                     if issubclass(elem_type, ctypes.Array):

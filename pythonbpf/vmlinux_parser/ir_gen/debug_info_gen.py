@@ -20,8 +20,10 @@ def is_function_pointer(ctype_complex_type) -> bool:
     if ctype_complex_type is ctypes.CFUNCTYPE:
         # class_handler stores the factory itself as the marker.
         return True
-    return isinstance(ctype_complex_type, type) and issubclass(
-        ctype_complex_type, ctypes._CFuncPtr
+    return (
+        isinstance(ctype_complex_type, type)
+        and hasattr(ctype_complex_type, "_restype_")
+        and hasattr(ctype_complex_type, "_argtypes_")
     )
 
 
