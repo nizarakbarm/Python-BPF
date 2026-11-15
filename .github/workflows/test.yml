@@ -105,13 +105,6 @@ jobs:
         continue-on-error: true
         run: python3 tools/vmlinux-gen.py -o vmlinux.py
 
-      - name: Upload vmlinux fixture
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: vmlinux-py
-          path: vmlinux.py
-
       - name: Report missing vmlinux coverage
         if: steps.vmlinux.outcome != 'success'
         run: echo "::warning::vmlinux.py was not generated; vmlinux fixtures were skipped in this run."
