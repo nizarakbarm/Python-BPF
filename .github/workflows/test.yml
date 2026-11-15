@@ -50,6 +50,15 @@ jobs:
           clang --version
           llc --version
 
+          # ctypeslib2 (test extra) pins clang==16.0.6, whose cindex loads
+          # libclang-16.so. The LLVM 22 install above does not provide it, so
+          # vmlinux.py generation dies with LibclangError even though every
+          # other vmlinux dependency is present.
+          sudo apt-get install -y libclang-16-dev
+          sudo ln -sf /usr/lib/llvm-16/lib/libclang.so.1 \
+                      /usr/lib/x86_64-linux-gnu/libclang-16.so
+          sudo ldconfig
+
           # bpftool isn't an installable package by itself on Ubuntu: it comes
           # from linux-tools-common plus a kernel-flavour linux-tools-<flavour>
           # package, and newer runner images ship neither under a path the
