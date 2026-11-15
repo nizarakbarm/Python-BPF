@@ -50,6 +50,12 @@ jobs:
           clang --version
           llc --version
 
+          # ctypeslib2 pins python-clang 16, whose cindex asks for
+          # libclang-16.so by name. The installed LLVM 22 library is
+          # ABI-compatible for this use; expose it under the expected name.
+          sudo ln -sf /usr/lib/llvm-22/lib/libclang.so.1 \
+                      /usr/lib/llvm-22/lib/libclang-16.so
+
           # bpftool isn't an installable package by itself on Ubuntu: it comes
           # from linux-tools-common plus a kernel-flavour linux-tools-<flavour>
           # package, and newer runner images ship neither under a path the
