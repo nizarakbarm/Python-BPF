@@ -51,7 +51,6 @@ def get_or_create_ptr_from_arg(
     """Extract or create pointer from the call arguments."""
 
     logger.info(f"Getting pointer from arg: {ast.dump(arg)}")
-    sz = None
     if isinstance(arg, ast.Name):
         symbol = local_sym_tab.get(arg.id) if local_sym_tab else None
         if symbol is not None and symbol.var is None:
@@ -107,7 +106,7 @@ def get_or_create_ptr_from_arg(
             and isinstance(field_type.element, ir.IntType)
             and field_type.element.width == 8
         ):
-            ptr, sz = get_char_array_ptr_and_size(
+            ptr, _ = get_char_array_ptr_and_size(
                 arg, builder, local_sym_tab, compilation_context, func
             )
             if not ptr:
@@ -144,10 +143,8 @@ def get_or_create_ptr_from_arg(
             val = convert(builder, val, val.type, expected_type)
         builder.store(val, ptr)
 
-    # NOTE: For char arrays, also return size
-    if sz:
-        return ptr, sz
-
+    # Always a pointer: the size-bearing destinations go through
+    # get_ptr_and_size_from_arg, so no caller has to unpack a union return.
     return ptr
 
 
@@ -316,6 +313,21 @@ def get_char_array_ptr_and_size(
         var_ptr = local_sym_tab[var_name].var
         var_type = local_sym_tab[var_name].ir_type
 
+        if _is_char_array(var_type):
+            # A stack buffer from `buf = c_char * N`: hand out its first
+            # element, which is what a string helper takes.
+            return (
+                builder.gep(
+                    var_ptr,
+                    [
+                        ir.Constant(ir.IntType(32), 0),
+                        ir.Constant(ir.IntType(32), 0),
+                    ],
+                    inbounds=True,
+                ),
+                var_type.count,
+            )
+
         if not isinstance(var_type, ir.PointerType) or not isinstance(
             var_type.pointee, ir.IntType(8)
         ):
@@ -337,7 +349,25 @@ def _is_char_array(ir_type):
 
 
 def get_ptr_from_arg(arg, func, compilation_context, builder, local_sym_tab):
-    """Evaluate argument and return pointer value"""
+    """Evaluate argument and return a pointer value.
+
+    An integer holding an address is what a register, a struct field or an
+    i64 local gives back -- `ctx.si` on a kprobe, or the slot holding it. C
+    would have the pointee type there; the frontend has an i64, so cast it
+    with inttoptr, the way a `(void *)` cast reads. Without the cast the
+    helper call would take the address of the slot that holds the value.
+    """
+    if isinstance(arg, ast.Name) and local_sym_tab:
+        symbol = local_sym_tab.get(arg.id)
+        if symbol is not None and symbol.var is None:
+            # The context parameter: it arrives as func.args[0], with no
+            # stack slot to load from.
+            if not func.args:
+                raise ValueError(
+                    f"'{arg.id}' is the context parameter but "
+                    f"'{func.name}' takes no arguments"
+                )
+            return builder.bitcast(func.args[0], ir.PointerType()), ir.PointerType()
 
     result = eval_expr(func, compilation_context, builder, arg, local_sym_tab)
 
@@ -346,10 +376,46 @@ def get_ptr_from_arg(arg, func, compilation_context, builder, local_sym_tab):
 
     val, val_type = result
 
-    if not isinstance(val_type, ir.PointerType):
-        raise ValueError(f"Expected pointer type, got {val_type}")
+    if isinstance(val.type, ir.PointerType):
+        return val, val.type
 
-    return val, val_type
+    if isinstance(val.type, ir.IntType):
+        ptr_type = ir.PointerType(ir.IntType(8))
+        return builder.inttoptr(val, ptr_type), ptr_type
+
+    raise ValueError(f"Expected pointer type, got {val_type}")
+
+
+def get_ptr_and_size_from_arg(arg, func, compilation_context, builder, local_sym_tab):
+    """Destination pointer and byte size for a probe_read_str buffer.
+
+    A char-array struct field has both; a local declared `buf = c_char * 256`
+    is an [N x i8] alloca whose size lives in the symbol table. Any other
+    destination has no size to give the helper and is rejected.
+    """
+    if isinstance(arg, ast.Attribute):
+        ptr, size = get_char_array_ptr_and_size(
+            arg, builder, local_sym_tab, compilation_context, func
+        )
+        if ptr is None or not size:
+            raise ValueError(
+                f"probe_read_str destination on line {arg.lineno} must be a "
+                f"char array field"
+            )
+        return ptr, size
+
+    ptr = get_or_create_ptr_from_arg(
+        func, compilation_context, arg, builder, local_sym_tab
+    )
+    if isinstance(arg, ast.Name) and local_sym_tab:
+        symbol = local_sym_tab.get(arg.id)
+        if symbol is not None and _is_char_array(symbol.ir_type):
+            return ptr, symbol.ir_type.count
+
+    raise ValueError(
+        f"probe_read_str destination on line {getattr(arg, 'lineno', '?')} "
+        f"must be a char array; declare it with `buf = c_char * N`"
+    )
 
 
 def get_int_value_from_arg(arg, func, compilation_context, builder, local_sym_tab):

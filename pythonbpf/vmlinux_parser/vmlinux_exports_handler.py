@@ -212,7 +212,7 @@ class VmlinuxHandler:
 
             elif field_data.type.__module__ == "vmlinux":
                 # For pointers to structs or complex vmlinux types
-                if field_data.ctype_complex_type is not None and issubclass(
+                if isinstance(field_data.ctype_complex_type, type) and issubclass(
                     field_data.ctype_complex_type, ctypes._Pointer
                 ):
                     int_width = 64  # Pointers are always 64-bit
@@ -349,7 +349,7 @@ class VmlinuxHandler:
 
             elif field_data.type.__module__ == "vmlinux":
                 # For pointers to structs or complex vmlinux types
-                if field_data.ctype_complex_type is not None and issubclass(
+                if isinstance(field_data.ctype_complex_type, type) and issubclass(
                     field_data.ctype_complex_type, ctypes._Pointer
                 ):
                     int_width = 64  # Pointers are always 64-bit

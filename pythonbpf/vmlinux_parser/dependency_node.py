@@ -296,7 +296,7 @@ class DependencyNode:
             size_of_field = ctypes.sizeof(processing_field.type)
             return size_of_field
         elif processing_field.type.__module__ == "vmlinux":
-            if processing_field.ctype_complex_type is not None:
+            if isinstance(processing_field.ctype_complex_type, type):
                 if issubclass(processing_field.ctype_complex_type, ctypes.Array):
                     if processing_field.containing_type.__module__ == ctypes.__name__:
                         if (

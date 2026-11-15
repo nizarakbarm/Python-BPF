@@ -6,7 +6,14 @@ from .symbols import LocalSymbol
 from pythonbpf.helper import HelperHandlerRegistry
 from pythonbpf.vmlinux_parser.dependency_node import Field
 from .expr import VmlinuxHandlerRegistry
-from pythonbpf.type_deducer import ctypes_to_ir, is_ctypes, IntTy, signedness, byte_size
+from pythonbpf.type_deducer import (
+    ctypes_to_ir,
+    ctypes_array_type,
+    is_ctypes,
+    IntTy,
+    signedness,
+    byte_size,
+)
 from pythonbpf.expr.type_inference import infer_int_type
 from pythonbpf.expr.operators import usual_arithmetic_conversions
 from pythonbpf.maps import BPFMapType
@@ -473,6 +480,16 @@ def _allocate_for_binop(builder, var_name, rval, local_sym_tab, compilation_cont
     inferred statically. Falls back to signed when the expression involves
     something the inference does not know.
     """
+    array_type = ctypes_array_type(rval)
+    if array_type is not None:
+        # `buf = c_char * 256` is a declaration, not arithmetic: a stack
+        # buffer the program can hand to probe_read_str.
+        var = builder.alloca(array_type, name=var_name)
+        var.align = _get_alignment(array_type)
+        local_sym_tab[var_name] = LocalSymbol(var, array_type)
+        logger.info(f"Pre-allocated {var_name} as {array_type}")
+        return
+
     inferred = infer_int_type(rval, local_sym_tab, compilation_context)
     if inferred is None:
         logger.debug(f"Could not infer a type for {var_name}, assuming signed i64")
@@ -624,7 +641,7 @@ def _allocate_for_attribute(
             # Check if it's a nested vmlinux struct or complex type
             elif field.type.__module__ == "vmlinux":
                 # For pointers to structs, use pointer type (64-bit)
-                if field.ctype_complex_type is not None and issubclass(
+                if isinstance(field.ctype_complex_type, type) and issubclass(
                     field.ctype_complex_type, ctypes._Pointer
                 ):
                     actual_ir_type = ir.IntType(64)  # Pointer is always 64-bit

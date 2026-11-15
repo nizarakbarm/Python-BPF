@@ -20,9 +20,28 @@ Requirements:
 import argparse
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
+
+
+def clang2py_command():
+    """The clang2py entry point, or its module equivalent.
+
+    pip/uv normally installs a `clang2py` console script, but an environment
+    can contain ctypeslib2 without the script on PATH (CI's uv install did).
+    Running the module through the interpreter that imports it is equivalent
+    and removes the PATH dependency.
+    """
+    executable = shutil.which("clang2py")
+    if executable:
+        return executable
+    try:
+        import ctypeslib.clang2py  # noqa: F401
+    except ImportError:
+        return None
+    return f"{sys.executable} -m ctypeslib.clang2py"
 
 
 class BTFConverter:
@@ -38,6 +57,7 @@ class BTFConverter:
         self.keep_intermediate = keep_intermediate
         self.verbose = verbose
         self.temp_dir = tempfile.mkdtemp() if not keep_intermediate else "."
+        self.clang2py = clang2py_command()
 
     def log(self, message):
         """Print message if verbose mode is enabled."""
@@ -223,7 +243,7 @@ class BTFConverter:
         """Step 3: Convert to Python ctypes using clang2py."""
         output_file = os.path.join(self.temp_dir, "vmlinux_raw.py")
         cmd = (
-            f"clang2py {input_file} -o {output_file} "
+            f"{self.clang2py} {input_file} -o {output_file} "
             f'--clang-args="-fno-ms-extensions -I/usr/include -I/usr/include/linux"'
         )
         self.run_command(cmd, "Converting to Python ctypes")
@@ -449,7 +469,6 @@ class BTFConverter:
         dependencies = {
             "bpftool": "bpftool --version",
             "clang": "clang --version",
-            "clang2py": "clang2py --version",
         }
 
         missing = []
@@ -458,6 +477,8 @@ class BTFConverter:
                 subprocess.run(cmd, shell=True, check=True, capture_output=True)
             except subprocess.CalledProcessError:
                 missing.append(tool)
+        if self.clang2py is None:
+            missing.append("clang2py")
 
         if missing:
             print("Error: Missing required dependencies:", file=sys.stderr)

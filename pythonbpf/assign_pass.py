@@ -5,7 +5,7 @@ from inspect import isclass
 from llvmlite import ir
 from pythonbpf.expr import eval_expr, convert
 from pythonbpf.helper import emit_probe_read_kernel_str_call
-from pythonbpf.type_deducer import field_int_type
+from pythonbpf.type_deducer import ctypes_array_type, field_int_type
 from pythonbpf.vmlinux_parser.dependency_node import Field
 
 logger = logging.getLogger(__name__)
@@ -118,6 +118,11 @@ def handle_variable_assignment(
         logger.error(f"Variable {var_name} not declared.")
         return False
 
+    if ctypes_array_type(rval) is not None:
+        # A stack-buffer declaration: the allocation pass already made the
+        # alloca, and there is no value to store.
+        return True
+
     var_ptr = local_sym_tab[var_name].var
     var_type = local_sym_tab[var_name].ir_type
 
@@ -161,6 +166,10 @@ def handle_variable_assignment(
         field_ty = field_int_type(val_type)
         if field_ty is not None:
             val_type = field_ty
+        elif isinstance(val.type, ir.IntType) and isinstance(var_type, ir.IntType):
+            # A pointer field: load_struct_field already hands back its
+            # 64-bit representation, and the slot holds the same i64.
+            val_type = val.type
 
     if isinstance(val_type, ir.IntType) and isinstance(var_type, ir.IntType):
         # The descriptor may be narrower than the constant carrying the value

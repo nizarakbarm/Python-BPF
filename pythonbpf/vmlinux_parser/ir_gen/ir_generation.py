@@ -3,7 +3,7 @@ import logging
 
 from ..assignment_info import AssignmentInfo, AssignmentType
 from ..dependency_handler import DependencyHandler
-from .debug_info_gen import debug_info_generation
+from .debug_info_gen import debug_info_generation, is_function_pointer
 from ..dependency_node import DependencyNode
 import llvmlite.ir as ir
 
@@ -96,7 +96,11 @@ class IRGenerator:
                         members_dict[field_name] = (field_global_variable, field)
                     else:
                         raise ValueError(
-                            f"llvm global name not found for struct field {field_name}"
+                            f"llvm global name not found for field "
+                            f"{struct.name}.{field_name} "
+                            f"(complex={field.ctype_complex_type!r}, "
+                            f"size={field.type_size!r}, "
+                            f"containing={field.containing_type!r})"
                         )
                         # members_dict[field_name] = (field_name, field)
 
@@ -147,7 +151,9 @@ class IRGenerator:
                 self.generated_field_names[struct.name][field_name] = globvar
                 continue
             # does not take arrays and similar types into consideration yet.
-            if callable(field.ctype_complex_type):
+            # Not callable(): ctypes.Array/_Pointer are classes too, and must
+            # fall through to the array/pointer branches below.
+            if is_function_pointer(field.ctype_complex_type):
                 # Function pointer case - generate a simple field accessor
                 field_co_re_name, returned = self._struct_name_generator(
                     struct, field, field_index
@@ -159,36 +165,40 @@ class IRGenerator:
                 globvar.linkage = "external"
                 globvar.set_metadata("llvm.preserve.access.index", debug_info)
                 self.generated_field_names[struct.name][field_name] = globvar
-            elif field.ctype_complex_type is not None and issubclass(
+            elif isinstance(field.ctype_complex_type, type) and issubclass(
                 field.ctype_complex_type, ctypes.Array
             ):
                 array_size = field.type_size
                 containing_type = field.containing_type
-                if containing_type.__module__ == ctypes.__name__:
-                    containing_type_size = ctypes.sizeof(containing_type)
-                    if array_size == 0:
-                        field_co_re_name, returned = self._struct_name_generator(
-                            struct, field, field_index, True, 0, containing_type_size
-                        )
-                        globvar = ir.GlobalVariable(
-                            self.llvm_module, ir.IntType(64), name=field_co_re_name
-                        )
-                        globvar.linkage = "external"
-                        globvar.set_metadata("llvm.preserve.access.index", debug_info)
-                        self.generated_field_names[struct.name][field_name] = globvar
-                        field_index += 1
-                        continue
-                    for i in range(0, array_size):
-                        field_co_re_name, returned = self._struct_name_generator(
-                            struct, field, field_index, True, i, containing_type_size
-                        )
-                        globvar = ir.GlobalVariable(
-                            self.llvm_module, ir.IntType(64), name=field_co_re_name
-                        )
-                        globvar.linkage = "external"
-                        globvar.set_metadata("llvm.preserve.access.index", debug_info)
-                        self.generated_field_names[struct.name][field_name] = globvar
+                # The element can be a ctypes scalar/pointer or a vmlinux
+                # class (`POINTER(struct_kmem_cache_node) * 1024`); sizeof is
+                # the element stride either way.
+                containing_type_size = (
+                    ctypes.sizeof(containing_type) if containing_type is not None else 0
+                )
+                if array_size == 0:
+                    field_co_re_name, returned = self._struct_name_generator(
+                        struct, field, field_index, True, 0, containing_type_size
+                    )
+                    globvar = ir.GlobalVariable(
+                        self.llvm_module, ir.IntType(64), name=field_co_re_name
+                    )
+                    globvar.linkage = "external"
+                    globvar.set_metadata("llvm.preserve.access.index", debug_info)
+                    self.generated_field_names[struct.name][field_name] = globvar
                     field_index += 1
+                    continue
+                for i in range(0, array_size):
+                    field_co_re_name, returned = self._struct_name_generator(
+                        struct, field, field_index, True, i, containing_type_size
+                    )
+                    globvar = ir.GlobalVariable(
+                        self.llvm_module, ir.IntType(64), name=field_co_re_name
+                    )
+                    globvar.linkage = "external"
+                    globvar.set_metadata("llvm.preserve.access.index", debug_info)
+                    self.generated_field_names[struct.name][field_name] = globvar
+                field_index += 1
             elif field.type_size is not None:
                 array_size = field.type_size
                 containing_type = field.containing_type

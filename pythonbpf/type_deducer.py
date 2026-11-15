@@ -1,3 +1,5 @@
+import ast
+
 from llvmlite import ir
 
 
@@ -132,6 +134,9 @@ mapping.update(
     {
         "c_float": ir.FloatType(),
         "c_double": ir.DoubleType(),
+        # A byte of a string buffer, not an integer field: leaving it out of
+        # _INT_CTYPE_WIDTHS keeps char struct fields ranked as they were.
+        "c_char": ir.IntType(8),
         # Not so sure about this one
         "str": ir.PointerType(ir.IntType(8)),
     }
@@ -146,3 +151,34 @@ def ctypes_to_ir(ctype: str):
 
 def is_ctypes(ctype: str) -> bool:
     return ctype in mapping
+
+
+def ctypes_array_type(node):
+    """IR stack array for a `c_char * 256` declaration in a function body.
+
+    None when the expression is not a ctypes type scaled by an integer, so
+    ordinary arithmetic still goes through the binop lowering. In C++ the
+    same expression is a type, not a value: nothing is evaluated or stored,
+    the alloca is the whole result.
+    """
+    if not isinstance(node, ast.BinOp) or not isinstance(node.op, ast.Mult):
+        return None
+    left, right = node.left, node.right
+    if isinstance(left, ast.Constant) and isinstance(right, ast.Name):
+        left, right = right, left
+    if not (isinstance(left, ast.Name) and is_ctypes(left.id)):
+        return None
+    if not (
+        isinstance(right, ast.Constant)
+        and isinstance(right.value, int)
+        and not isinstance(right.value, bool)
+    ):
+        return None
+    element = ctypes_to_ir(left.id)
+    if not isinstance(element, ir.IntType):
+        return None
+    if right.value <= 0:
+        raise SyntaxError(
+            f"array size on line {node.lineno} must be positive, got {right.value}"
+        )
+    return ir.ArrayType(element, right.value)

@@ -10,6 +10,7 @@ from .helper_utils import (
     get_data_ptr_and_size,
     get_buffer_ptr_and_size,
     get_ptr_from_arg,
+    get_ptr_and_size_from_arg,
     get_int_value_from_arg,
 )
 from .printk_formatter import simple_string_print, handle_fstring_print
@@ -584,9 +585,9 @@ def bpf_probe_read_kernel_str_emitter(
             f"probe_read_str expects 2 args (dst, src), got {len(call.args)}"
         )
 
-    # Get destination buffer (char array -> i8*)
-    dst_ptr, dst_size = get_or_create_ptr_from_arg(
-        func, compilation_context, call.args[0], builder, local_sym_tab
+    # Get destination buffer (char array -> i8*, and its size)
+    dst_ptr, dst_size = get_ptr_and_size_from_arg(
+        call.args[0], func, compilation_context, builder, local_sym_tab
     )
 
     # Get source pointer (evaluate expression)
@@ -651,9 +652,9 @@ def bpf_probe_read_kernel_emitter(
             f"probe_read_kernel expects 2 args (dst, src), got {len(call.args)}"
         )
 
-    # Get destination buffer (char array -> i8*)
-    dst_ptr, dst_size = get_or_create_ptr_from_arg(
-        func, compilation_context, call.args[0], builder, local_sym_tab
+    # Get destination buffer (char array -> i8*, and its size)
+    dst_ptr, dst_size = get_ptr_and_size_from_arg(
+        call.args[0], func, compilation_context, builder, local_sym_tab
     )
 
     # Get source pointer (evaluate expression)
@@ -731,13 +732,15 @@ def bpf_probe_read_emitter(
         builder,
         local_sym_tab,
     )
-    src_ptr = get_or_create_ptr_from_arg(
+    # The source is a kernel address: a register, a field or an i64 local
+    # holding one. get_ptr_from_arg inttoptr's it; asking for the address of
+    # the slot instead would read the pointer value itself.
+    src_ptr, src_type = get_ptr_from_arg(
+        call.args[2],
         func,
         compilation_context,
-        call.args[2],
         builder,
         local_sym_tab,
-        ir.IntType(8),
     )
     fn_type = ir.FunctionType(
         ir.IntType(64),
