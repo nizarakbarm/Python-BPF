@@ -96,7 +96,7 @@ jobs:
           # ctypeslib2 searches libclang-16 first and the pinned clang
           # bindings accept a newer library, but the LLVM 22 path is outside
           # find_library's search. Point it at the library llvm.sh installed.
-          CLANG_LIBRARY_PATH: /usr/lib/llvm-22/lib/libclang.so.1
+          CLANG_LIBRARY_PATH: /usr/lib/llvm-22/lib
         run: python3 tools/vmlinux-gen.py -o vmlinux.py
 
       - name: Report missing vmlinux coverage
