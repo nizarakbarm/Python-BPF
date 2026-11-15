@@ -50,12 +50,6 @@ jobs:
           clang --version
           llc --version
 
-          # ctypeslib2 pins python-clang 16, whose cindex asks for
-          # libclang-16.so by name. The installed LLVM 22 library is
-          # ABI-compatible for this use; expose it under the expected name.
-          sudo ln -sf /usr/lib/llvm-22/lib/libclang.so.1 \
-                      /usr/lib/llvm-22/lib/libclang-16.so
-
           # bpftool isn't an installable package by itself on Ubuntu: it comes
           # from linux-tools-common plus a kernel-flavour linux-tools-<flavour>
           # package, and newer runner images ship neither under a path the
@@ -79,7 +73,11 @@ jobs:
         run: pip install uv
 
       - name: Install project
-        run: uv pip install --system -e ".[test]"
+        run: |
+          uv pip install --system -e ".[test]"
+          # The distribution wheel bundles libclang.so for the pinned
+          # python-clang 16; the system LLVM 22 path is not found by cindex.
+          uv pip install --system libclang==16.0.6
 
       # uv installs console scripts (clang2py from ctypeslib2, pytest) into the
       # interpreter's scripts directory, which setup-python does not reliably
@@ -95,14 +93,16 @@ jobs:
       # pin is clang 16.0.6), so a mismatch degrades instead of blocking: pytest
       # skips the vmlinux fixtures when vmlinux.py is absent and every other
       # level still gates. A run where this step fails prints a warning.
+      - name: Locate libclang
+        run: |
+          libclang=$(python -c 'import os, clang; print(os.path.join(os.path.dirname(clang.__file__), "native", "libclang.so"))')
+          test -f "$libclang"
+          echo "CLANG_LIBRARY_PATH=$libclang" >> "$GITHUB_ENV"
+          echo "libclang: $libclang"
+
       - name: Generate vmlinux fixture
         id: vmlinux
         continue-on-error: true
-        env:
-          # ctypeslib2 searches libclang-16 first and the pinned clang
-          # bindings accept a newer library, but the LLVM 22 path is outside
-          # find_library's search. Point it at the library llvm.sh installed.
-          CLANG_LIBRARY_PATH: /usr/lib/llvm-22/lib
         run: python3 tools/vmlinux-gen.py -o vmlinux.py
 
       - name: Report missing vmlinux coverage
